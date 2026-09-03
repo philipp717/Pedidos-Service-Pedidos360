@@ -1,9 +1,22 @@
 package cl.duoc.pedidos360.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.security.oauth2.jwt.SupplierJwtDecoder;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenAuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -14,24 +27,55 @@ import java.util.List;
 @Configuration
 public class SecurityConfig {
 
-    /**
-     * Configuración TEMPORAL para probar el CRUD localmente sin autenticación.
-     * Será reemplazada por seguridad JWT con Microsoft Entra ID.
-    */
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             CorsConfigurationSource corsConfigurationSource) throws Exception {
+        BearerTokenAuthenticationEntryPoint authenticationEntryPoint =
+                new BearerTokenAuthenticationEntryPoint();
+
         http
-                // Deshabilitado temporalmente para permitir POST, PUT y DELETE en pruebas locales.
+                // Las APIs usan tokens Bearer y no autenticación basada en cookies.
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
+                .sessionManagement(session -> session
+                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/**", "/actuator/health").permitAll()
-                        .anyRequest().authenticated());
+                        .requestMatchers("/actuator/health").permitAll()
+                        .requestMatchers("/api/**").authenticated()
+                        .anyRequest().authenticated())
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(authenticationEntryPoint))
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .jwt(Customizer.withDefaults()));
 
         return http.build();
+    }
+
+    @Bean
+    public JwtDecoder jwtDecoder(
+            @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuer,
+            @Value("${pedidos360.security.jwt.audience}") String audience) {
+        return new SupplierJwtDecoder(() -> createJwtDecoder(issuer, audience));
+    }
+
+    private NimbusJwtDecoder createJwtDecoder(String issuer, String audience) {
+        NimbusJwtDecoder decoder = NimbusJwtDecoder.withIssuerLocation(issuer).build();
+
+        OAuth2TokenValidator<Jwt> issuerAndTimestampValidator =
+                JwtValidators.createDefaultWithIssuer(issuer);
+        OAuth2TokenValidator<Jwt> audienceValidator =
+                new JwtClaimValidator<List<String>>(
+                        JwtClaimNames.AUD,
+                        audiences -> audiences != null && audiences.contains(audience));
+
+        decoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
+                issuerAndTimestampValidator,
+                audienceValidator));
+
+        return decoder;
     }
 
     @Bean
