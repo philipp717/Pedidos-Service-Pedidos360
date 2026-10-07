@@ -1,6 +1,7 @@
 package cl.duoc.pedidos360.service;
 
 import cl.duoc.pedidos360.model.Pedido;
+import cl.duoc.pedidos360.messaging.producer.PedidoEventPublisher;
 import cl.duoc.pedidos360.repository.PedidoRepository;
 import org.springframework.stereotype.Service;
 
@@ -11,9 +12,11 @@ import java.util.Optional;
 public class PedidoService {
 
     private final PedidoRepository pedidoRepository;
+    private final PedidoEventPublisher pedidoEventPublisher;
 
-    public PedidoService(PedidoRepository pedidoRepository) {
+    public PedidoService(PedidoRepository pedidoRepository, PedidoEventPublisher pedidoEventPublisher) {
         this.pedidoRepository = pedidoRepository;
+        this.pedidoEventPublisher = pedidoEventPublisher;
     }
 
     public List<Pedido> listarTodos() {
@@ -26,7 +29,9 @@ public class PedidoService {
 
     public Pedido crear(Pedido pedido) {
         pedido.setId(null);
-        return pedidoRepository.save(pedido);
+        Pedido pedidoCreado = pedidoRepository.save(pedido);
+        pedidoEventPublisher.publicarPedidoCreado(pedidoCreado);
+        return pedidoCreado;
     }
 
     public Optional<Pedido> actualizar(Long id, Pedido pedido) {
